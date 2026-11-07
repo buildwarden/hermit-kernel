@@ -275,7 +275,12 @@ pub(crate) fn init() {
 
 	let fdt = env::fdt().unwrap();
 
-	let intc_node = fdt.find_node("/intc").unwrap();
+	// By compatible, not by name: Qemu names the node `intc`, Apple's
+	// Virtualization framework `gic`.
+	let intc_node = fdt
+		.find_compatible(&["arm,gic-v3", "arm,gic-v4"])
+		.or_else(|| fdt.find_node("/intc"))
+		.unwrap();
 	let mut reg_iter = intc_node.reg().unwrap();
 	let gicd_reg = reg_iter.next().unwrap();
 	let gicr_reg = reg_iter.next().unwrap();

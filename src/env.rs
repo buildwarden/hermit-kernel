@@ -49,7 +49,13 @@ pub fn is_uhyve() -> bool {
 }
 
 pub fn is_uefi() -> bool {
-	fdt().is_some_and(|fdt| fdt.root().compatible().first() == "hermit,uefi")
+	// Not `fdt.root().compatible()`: it panics when the root node has no
+	// `compatible` property, as on Apple's Virtualization framework.
+	fdt().is_some_and(|fdt| {
+		fdt.find_node("/")
+			.and_then(|root| root.compatible())
+			.is_some_and(|compatible| compatible.first() == "hermit,uefi")
+	})
 }
 
 pub fn fdt() -> Option<Fdt<'static>> {

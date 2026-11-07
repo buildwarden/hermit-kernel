@@ -259,6 +259,17 @@ pub fn supports_2mib_pages() -> bool {
 }
 
 pub fn configure() {
+	// The PMU registers below are UNDEFINED without a PMU, and some
+	// hypervisors (Apple's Virtualization framework) expose none: the first
+	// access would take an exception before any console exists.
+	// PMUVer 0b0000 is "not implemented", 0b1111 an IMPLEMENTATION DEFINED
+	// PMU without the architected registers.
+	let pmu_ver = ID_AA64DFR0_EL1.read(ID_AA64DFR0_EL1::PMUVer);
+	if pmu_ver == 0 || pmu_ver == 0xf {
+		debug!("No architected PMU (PMUVer {pmu_ver:#x}), skipping PMU setup");
+		return;
+	}
+
 	// TODO: PMCCNTR_EL0 is the best replacement for RDTSC on AArch64.
 	// However, this test code showed that it's apparently not supported under uhyve yet.
 	// Finish the boot loader for QEMU first and then run this code under QEMU, where it should be supported.

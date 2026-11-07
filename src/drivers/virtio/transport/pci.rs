@@ -55,13 +55,25 @@ pub fn map_dev_cfg<T>(cap: &PciCap) -> Option<&'static mut T> {
 		return None;
 	}
 
-	// Drivers MAY do this check. See Virtio specification v1.1. - 4.1.4.1
-	if cap.len() < u64::try_from(mem::size_of::<T>()).unwrap() {
-		error!(
-			"Device specific config from device {:x}, does not represent actual structure specified by the standard!",
-			cap.dev_id()
+	// A device only has to expose the fields of the features it offers
+	// (Virtio specification v1.2 - 2.5), so the capability may be shorter than
+	// the full structure; Apple's Virtualization framework's virtio-net is. The
+	// drivers read only fields of negotiated features, but the structure must
+	// still fit into the mapped bar so no access can leave it.
+	let size = u64::try_from(mem::size_of::<T>()).unwrap();
+	if cap.len() < size {
+		if cap.bar_len() < cap.offset() + size {
+			error!(
+				"Device specific config from device {:x} is shorter than the structure specified by the standard and its bar cannot hold it!",
+				cap.dev_id()
+			);
+			return None;
+		}
+		warn!(
+			"Device specific config from device {:x} is {} of {size} bytes; only fields of offered features are present",
+			cap.dev_id(),
+			cap.len()
 		);
-		return None;
 	}
 
 	let virt_addr_raw = cap.bar_addr() + cap.offset();
@@ -295,12 +307,19 @@ impl ComCfg {
 		self.com_cfg.as_ptr()
 	}
 
-	/// Resets the device status field to zero.
+	/// Resets the device status field to zero and waits until the device has
+	/// reset.
+	///
+	/// See Virtio specification v1.2 - 4.1.4.3.2: the driver MUST wait for
+	/// `device_status` to read 0 before reinitializing the device. Apple's
+	/// Virtualization framework resets asynchronously: without the wait, the
+	/// late reset discards the queue setup and the device never uses them.
 	pub fn reset_dev(&mut self) {
-		self.com_cfg
-			.as_mut_ptr()
-			.device_status()
-			.write(DeviceStatus::empty());
+		let device_status = self.com_cfg.as_mut_ptr().device_status();
+		device_status.write(DeviceStatus::empty());
+		while !device_status.read().is_empty() {
+			core::hint::spin_loop();
+		}
 	}
 
 	/// Sets the device status field to FAILED.

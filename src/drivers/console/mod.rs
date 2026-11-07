@@ -101,6 +101,25 @@ impl ReadReady for VirtioUART {
 
 impl Write for VirtioUART {
 	fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+		// The console replaces the UART while the drivers are still being
+		// registered, before get_console_driver can find it. Keep that output
+		// with the early output and send it all with the first write that can.
+		#[cfg(target_arch = "aarch64")]
+		{
+			use crate::arch::kernel::serial::{push_early_output, take_early_output};
+
+			let Some(drv) = get_console_driver() else {
+				push_early_output(buf);
+				return Ok(buf.len());
+			};
+			let mut drv = drv.lock();
+			let mut result = Ok(());
+			take_early_output(|early| result = drv.write_all(early));
+			result?;
+			drv.write_all(buf)?;
+		}
+
+		#[cfg(not(target_arch = "aarch64"))]
 		if let Some(drv) = get_console_driver() {
 			drv.lock().write_all(buf)?;
 		}
@@ -394,10 +413,15 @@ impl Read for VirtioConsoleDriver {
 }
 
 impl Write for VirtioConsoleDriver {
+	/// Sends at most one packet. A longer `buf` is a short write, which
+	/// `write_all` continues; one packet of it all would trip the packet-size
+	/// assertion in `send_packet`.
 	fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-		self.send_vq.send_packet(buf);
+		let max = usize::try_from(self.send_vq.packet_length).unwrap() - 1;
+		let n = buf.len().min(max);
+		self.send_vq.send_packet(&buf[..n]);
 
-		Ok(buf.len())
+		Ok(n)
 	}
 
 	fn flush(&mut self) -> Result<(), Self::Error> {

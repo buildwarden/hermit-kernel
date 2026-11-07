@@ -655,8 +655,8 @@ impl VirtioNetDriver<Uninit> {
 		let features = minimal_features
 			// Indirect descriptors can be used
 			| virtio::net::F::INDIRECT_DESC
-			// Packed Vq can be used
-			| virtio::net::F::RING_PACKED
+			// Not RING_PACKED: on Apple's Virtualization framework the device
+			// never uses this driver's packed queues (split queues work).
 			| virtio::net::F::NOTIFICATION_DATA
 			// MTU setting can be used
 			| virtio::net::F::MTU
@@ -690,6 +690,24 @@ impl VirtioNetDriver<Uninit> {
 		// Indicates the device, that the current feature set is final for the driver
 		// and will not be changed.
 		self.com_cfg.features_ok();
+
+		// Some devices refuse CSUM without GUEST_CSUM, which this driver does
+		// not support (Apple's Virtualization framework does). Offer the set
+		// once more without CSUM before giving up.
+		let mut negotiated_features = negotiated_features;
+		if !self.com_cfg.check_features()
+			&& negotiated_features.contains(virtio::net::F::CSUM)
+		{
+			warn!("Device refused the feature set; retrying without CSUM");
+			self.com_cfg.reset_dev();
+			self.com_cfg.ack_dev();
+			self.com_cfg.set_drv();
+			negotiated_features = self
+				.com_cfg
+				.control_registers()
+				.negotiate_features(features - virtio::net::F::CSUM);
+			self.com_cfg.features_ok();
+		}
 
 		// Checks if the device has accepted final set. This finishes feature negotiation.
 		if self.com_cfg.check_features() {
