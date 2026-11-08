@@ -79,6 +79,11 @@ async fn vsock_run() {
 			let header_cid: u32 = header.src_cid.to_ne().try_into().unwrap();
 
 			let Some(raw) = vsock_guard.get_mut_socket(port) else {
+				// Nothing listens on the port: reset, so the peer's connect
+				// fails at once instead of waiting.
+				if op != Op::Rst {
+					hdr = Some(*header);
+				}
 				return;
 			};
 
@@ -110,15 +115,25 @@ async fn vsock_run() {
 				} else {
 					trace!("Receive message from invalid source {header_cid}");
 				}
-			} else if op == Op::Shutdown {
+			} else if op == Op::Shutdown || op == Op::Rst {
+				// The peer is done (or gone): readers see end of stream once
+				// the buffer drains. A reset is not answered.
 				if raw.remote_cid == header_cid {
 					raw.state = VsockState::Shutdown;
+					raw.rx_waker.wake();
+					raw.tx_waker.wake();
 				} else {
 					trace!("Receive message from invalid source {header_cid}");
 				}
 			} else if op == Op::Response && type_ == Type::Stream {
 				if raw.remote_cid == header_cid && raw.state == VsockState::Connecting {
 					raw.state = VsockState::Connected;
+					// The peer's credit, which writes wait on, and the waiting
+					// connect.
+					raw.peer_buf_alloc = header.buf_alloc.to_ne();
+					raw.peer_fwd_cnt = header.fwd_cnt.to_ne();
+					raw.rx_waker.wake();
+					raw.tx_waker.wake();
 				}
 			} else if raw.remote_cid == header_cid {
 				hdr = Some(*header);
