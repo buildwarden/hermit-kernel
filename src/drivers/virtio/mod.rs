@@ -7,6 +7,7 @@
 		feature = "virtio-console",
 		feature = "virtio-fs",
 		feature = "virtio-net",
+		feature = "virtio-rng",
 		feature = "virtio-vsock"
 	)),
 	allow(dead_code)
@@ -30,6 +31,7 @@ impl VirtioIdExt for virtio::Id {
 			Self::Console => "virtio-console",
 			Self::Fs => "virtio-fs",
 			Self::Vsock => "virtio-vsock",
+			Self::Rng => "virtio-rng",
 			_ => return None,
 		};
 

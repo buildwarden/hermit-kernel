@@ -1,7 +1,8 @@
 //! Cryptographically secure random data generation.
 //!
 //! This currently uses a ChaCha-based generator (the same one Linux uses!) seeded
-//! with random data provided by the processor.
+//! with random data provided by the processor or, failing that, by a virtio
+//! entropy device.
 
 use hermit_sync::InterruptTicketMutex;
 use rand_chacha::ChaCha20Rng;
@@ -25,6 +26,21 @@ struct Pool {
 
 static POOL: InterruptTicketMutex<Option<Pool>> = InterruptTicketMutex::new(None);
 
+/// Returns a seed from the processor or, failing that, the virtio entropy device.
+fn seed() -> Option<[u8; 32]> {
+	seed_entropy().or_else(|| {
+		#[cfg(feature = "virtio-rng")]
+		{
+			let mut seed = [0; 32];
+			if crate::drivers::rng::fill(&mut seed) {
+				return Some(seed);
+			}
+		}
+
+		None
+	})
+}
+
 /// Fills `buf` with random data, respecting the options in `flags`.
 ///
 /// Returns the number of bytes written or `-ENOSYS` if the system does not support
@@ -35,7 +51,7 @@ pub fn read(buf: &mut [u8], _flags: Flags) -> isize {
 	let pool = match pool {
 		Some(pool) if now.saturating_sub(pool.last_reseed) <= RESEED_INTERVAL => pool,
 		pool => {
-			let Some(seed) = seed_entropy() else {
+			let Some(seed) = seed() else {
 				return -i32::from(Errno::Nosys) as isize;
 			};
 

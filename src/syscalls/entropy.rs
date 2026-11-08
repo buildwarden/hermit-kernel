@@ -31,18 +31,13 @@ unsafe fn read_entropy(buf: *mut u8, len: usize, flags: u32) -> isize {
 		slice::from_raw_parts_mut(buf, len)
 	};
 
+	// Fails closed: without a seed there is no cryptographically secure data
+	// to return, and the caller must hear so rather than get guessable bytes.
 	let ret = entropy::read(buf, flags);
 	if ret < 0 {
-		warn!("Unable to read entropy! Fallback to a naive implementation!");
-		for byte in &mut *buf {
-			*byte = (generate_park_miller_lehmer_random_number() & 0xff)
-				.try_into()
-				.unwrap();
-		}
-		buf.len().try_into().unwrap()
-	} else {
-		ret
+		error!("No entropy source: the processor has none and there is no virtio entropy device");
 	}
+	ret
 }
 
 /// Fill `len` bytes in `buf` with cryptographically secure random data.

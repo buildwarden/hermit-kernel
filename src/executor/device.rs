@@ -65,9 +65,18 @@ impl<'a> NetworkInterface<'a> {
 		info!("{:?}", capabilities.checksum);
 		info!("MTU: {} bytes", capabilities.max_transmission_unit);
 
-		// use the current time based on the wall-clock time as seed
+		// smoltcp draws TCP initial sequence numbers and ephemeral ports from
+		// this seed, so take it from the entropy pool; the wall clock is a
+		// guessable last resort.
 		let mut config = Config::new(hardware_addr);
-		config.random_seed = (arch::kernel::systemtime::now_micros()) / 1_000_000;
+		let mut seed = [0; 8];
+		config.random_seed = if crate::entropy::read(&mut seed, crate::entropy::Flags::empty()) > 0
+		{
+			u64::from_ne_bytes(seed)
+		} else {
+			warn!("No entropy source: seeding the network stack from the wall clock");
+			(arch::kernel::systemtime::now_micros()) / 1_000_000
+		};
 		if capabilities.medium == Medium::Ethernet {
 			config.hardware_addr = hardware_addr;
 		}

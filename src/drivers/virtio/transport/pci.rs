@@ -36,6 +36,8 @@ use crate::drivers::pci::error::PciError;
 use crate::drivers::virtio::error::VirtioError;
 use crate::drivers::virtio::transport::pci::PciBar as VirtioPciBar;
 use crate::drivers::virtio::{ControlRegisters, VirtioIdExt};
+#[cfg(feature = "virtio-rng")]
+use crate::drivers::rng::VirtioRngDriver;
 #[cfg(feature = "virtio-vsock")]
 use crate::drivers::vsock::VirtioVsockDriver;
 
@@ -720,6 +722,19 @@ pub(crate) fn init_device(
 				Err(DriverError::InitVirtioDevFail(virtio_error))
 			}
 		},
+		#[cfg(feature = "virtio-rng")]
+		virtio::Id::Rng => match VirtioRngDriver::init(device) {
+			Ok(virt_rng_drv) => {
+				info!("Virtio entropy driver initialized.");
+				let irq = device.get_irq().unwrap();
+				crate::arch::interrupts::add_irq_name(irq, "virtio");
+				Ok(VirtioDriver::Rng(alloc::boxed::Box::new(virt_rng_drv)))
+			}
+			Err(virtio_error) => {
+				error!("Virtio entropy driver could not be initialized with device: {device_id:x}");
+				Err(DriverError::InitVirtioDevFail(virtio_error))
+			}
+		},
 		#[cfg(feature = "virtio-vsock")]
 		virtio::Id::Vsock => match VirtioVsockDriver::init(device) {
 			Ok(virt_sock_drv) => {
@@ -763,6 +778,8 @@ pub(crate) enum VirtioDriver {
 		feature = "virtio-net",
 	))]
 	Net(alloc::boxed::Box<VirtioNetDriver>),
+	#[cfg(feature = "virtio-rng")]
+	Rng(alloc::boxed::Box<VirtioRngDriver>),
 	#[cfg(feature = "virtio-vsock")]
 	Vsock(alloc::boxed::Box<VirtioVsockDriver>),
 }

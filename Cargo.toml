@@ -184,6 +184,10 @@ virtio-fs = ["virtio", "dep:fuse-abi", "fuse-abi/num_enum"]
 ## Enables the virtio-vsock driver.
 virtio-vsock = ["virtio", "pci"]
 
+## Enables the virtio entropy (virtio-rng) driver, which seeds the random number
+## generator where the processor has no random instruction, as on aarch64.
+virtio-rng = ["virtio", "pci"]
+
 #! ### Other Drivers
 
 ## Enables the _Video Graphics Array_ (VGA) driver.
