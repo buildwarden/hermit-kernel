@@ -19,6 +19,8 @@ use smoltcp::wire::{IpAddress, IpEndpoint, IpListenEndpoint};
 use crate::errno::Errno;
 #[cfg(feature = "net")]
 use crate::executor::network::{NIC, NetworkState};
+#[cfg(feature = "net-packet")]
+use crate::fd::socket::packet;
 #[cfg(feature = "tcp")]
 use crate::fd::socket::tcp;
 #[cfg(feature = "udp")]
@@ -39,6 +41,9 @@ pub enum Af {
 	Unix = 4,
 	#[cfg(feature = "virtio-vsock")]
 	Vsock = 2,
+	/// Whole Ethernet frames on the device named by `HERMIT_RAW_MAC`.
+	#[cfg(feature = "net-packet")]
+	Packet = 5,
 }
 
 impl From<IpAddr> for Af {
@@ -185,6 +190,9 @@ impl sockaddr {
 			Af::Unix => sockaddrRef::sockaddr_un(unsafe { &*ptr.cast() }),
 			#[cfg(feature = "virtio-vsock")]
 			Af::Vsock => sockaddrRef::sockaddr_vm(unsafe { &*ptr.cast() }),
+			// Packet sockets have no addresses; read no more than the header.
+			#[cfg(feature = "net-packet")]
+			Af::Packet => sockaddrRef::sockaddr(unsafe { &*ptr }),
 		};
 		Ok(ret)
 	}
@@ -198,6 +206,8 @@ impl sockaddr {
 			Af::Unix => sockaddrBox::sockaddr_un(unsafe { Box::from_raw(ptr.cast()) }),
 			#[cfg(feature = "virtio-vsock")]
 			Af::Vsock => sockaddrBox::sockaddr_vm(unsafe { Box::from_raw(ptr.cast()) }),
+			#[cfg(feature = "net-packet")]
+			Af::Packet => sockaddrBox::sockaddr(unsafe { Box::from_raw(ptr) }),
 		};
 		Ok(ret)
 	}
@@ -614,6 +624,27 @@ pub extern "C" fn sys_socket(domain: i32, type_: i32, protocol: i32) -> i32 {
 		}
 
 		let mut socket = vsock::Socket::new();
+
+		if sock_flags.contains(SockFlags::SOCK_NONBLOCK) {
+			block_on(socket.set_status_flags(fd::StatusFlags::O_NONBLOCK), None).unwrap();
+		}
+
+		let socket = Arc::new(async_lock::RwLock::new(socket));
+		let fd = insert_object(socket).expect("FD is already used");
+
+		return fd;
+	}
+
+	#[cfg(feature = "net-packet")]
+	if domain == Af::Packet {
+		if sock != Sock::Raw {
+			return -i32::from(Errno::Socktnosupport);
+		}
+
+		let mut socket = match packet::Socket::claim() {
+			Ok(socket) => socket,
+			Err(err) => return -i32::from(err),
+		};
 
 		if sock_flags.contains(SockFlags::SOCK_NONBLOCK) {
 			block_on(socket.set_status_flags(fd::StatusFlags::O_NONBLOCK), None).unwrap();

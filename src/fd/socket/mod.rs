@@ -1,3 +1,5 @@
+#[cfg(feature = "net-packet")]
+pub(crate) mod packet;
 #[cfg(feature = "tcp")]
 pub(crate) mod tcp;
 #[cfg(feature = "udp")]

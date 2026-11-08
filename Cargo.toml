@@ -167,6 +167,10 @@ net-trace = ["smoltcp?/log", "smoltcp?/verbose"]
 ## Enables the virtio-net driver.
 virtio-net = ["net", "virtio"]
 
+## Serves the virtio-net device whose MAC is HERMIT_RAW_MAC to packet sockets
+## instead of the network stack.
+net-packet = ["virtio-net", "pci"]
+
 ## Enables the RTL8139 network driver.
 rtl8139 = ["net", "pci", "volatile/derive", "endian-num"]
 

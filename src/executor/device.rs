@@ -29,6 +29,27 @@ cfg_if! {
 		use crate::drivers::net::NetworkDevice;
 
 		pub(crate) static NETWORK_DEVICE: SpinMutex<Option<NetworkDevice>> = SpinMutex::new(Option::None);
+
+		/// Gives a network device found at boot its role: the one whose MAC is
+		/// `HERMIT_RAW_MAC` serves packet sockets, the first other one the
+		/// network stack, and any further one nothing.
+		#[allow(dead_code)]
+		pub(crate) fn register(device: NetworkDevice) {
+			let mac = EthernetAddress(device.get_mac_address());
+
+			#[cfg(feature = "net-packet")]
+			if crate::fd::socket::packet::raw_mac() == Some(mac) {
+				crate::fd::socket::packet::install(device);
+				return;
+			}
+
+			let mut slot = NETWORK_DEVICE.lock();
+			if slot.is_some() {
+				warn!("Leaving network device {mac} unused: the network stack has one");
+				return;
+			}
+			*slot = Some(device);
+		}
 	} else {
 		use crate::drivers::net::loopback::LoopbackDriver;
 	}

@@ -443,6 +443,11 @@ pub(crate) fn get_interrupt_handlers() -> HashMap<InterruptLine, InterruptHandle
 		handlers.entry(irq_number).or_default().push_back(handler);
 	}
 
+	#[cfg(feature = "net-packet")]
+	if let Some((irq_number, handler)) = crate::fd::socket::packet::interrupt_handler() {
+		handlers.entry(irq_number).or_default().push_back(handler);
+	}
+
 	#[cfg(any(feature = "rtl8139", feature = "virtio-net"))]
 	if let Some(device) = NETWORK_DEVICE.lock().as_ref() {
 		handlers
@@ -514,7 +519,7 @@ pub(crate) fn init() {
 					register_driver(PciDriver::VirtioFs(InterruptTicketMutex::new(*drv)));
 				}
 				#[cfg(all(not(feature = "rtl8139"), feature = "virtio-net"))]
-				Ok(VirtioDriver::Net(drv)) => *crate::executor::device::NETWORK_DEVICE.lock() = Some(*drv),
+				Ok(VirtioDriver::Net(drv)) => crate::executor::device::register(*drv),
 				#[cfg(feature = "virtio-rng")]
 				Ok(VirtioDriver::Rng(drv)) => crate::drivers::rng::install(*drv),
 				#[cfg(feature = "virtio-vsock")]
