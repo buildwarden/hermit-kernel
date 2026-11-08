@@ -91,7 +91,9 @@ fn determine_rx_buf_size(dev_cfg: &NetDevCfg) -> u32 {
 			min_buf_size = u32::max(min_buf_size, 65562 - size_of::<Hdr>() as u32);
 		} else {
 			// Otherwise, the driver SHOULD populate the receive queue(s) with buffers of at least 1526 bytes.
-			min_buf_size = u32::max(min_buf_size, 1526 - size_of::<Hdr>() as u32);
+			// Apple's Virtualization framework wants 4 more, room for an 802.1Q tag: its file handle
+			// attachment sets DEVICE_NEEDS_RESET on the first frame it finds a 1526-byte buffer for.
+			min_buf_size = u32::max(min_buf_size, 1530 - size_of::<Hdr>() as u32);
 		}
 	}
 
@@ -407,16 +409,21 @@ impl NetworkDriver for VirtioNetDriver<Init> {
 	fn handle_interrupt(&mut self) {
 		let status = self.isr_stat.acknowledge();
 
+		// A device reports a link status change this way (VZ does when the
+		// peer of a file handle attachment comes and goes). Nothing in the
+		// configuration that the driver relies on changes at run time, so
+		// log the link state rather than bring the kernel down.
 		#[cfg(not(feature = "pci"))]
-		if status.contains(virtio::mmio::InterruptStatus::CONFIGURATION_CHANGE_NOTIFICATION) {
-			info!("Configuration changes are not possible! Aborting");
-			todo!("Implement possibility to change config on the fly...")
-		}
-
+		let config_changed =
+			status.contains(virtio::mmio::InterruptStatus::CONFIGURATION_CHANGE_NOTIFICATION);
 		#[cfg(feature = "pci")]
-		if status.contains(virtio::pci::IsrStatus::DEVICE_CONFIGURATION_INTERRUPT) {
-			info!("Configuration changes are not possible! Aborting");
-			todo!("Implement possibility to change config on the fly...")
+		let config_changed = status.contains(virtio::pci::IsrStatus::DEVICE_CONFIGURATION_INTERRUPT);
+		if config_changed {
+			info!(
+				"Network device {:x?} configuration changed; link up: {}",
+				self.get_mac_address(),
+				self.is_link_up()
+			);
 		}
 	}
 }
